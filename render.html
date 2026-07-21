@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>中国行政区地图</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        html,
+        body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 控制面板 */
+        .control-box {
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+            box-shadow: 0 0 8px #999;
+            font-size: 14px;
+        }
+
+        /* 省 */
+        .province-label {
+            font-size: 10px;
+            font-weight: bold;
+            color: #000;
+            white-space: nowrap;
+        }
+
+        /* 市 */
+        .city-label {
+            font-size: 8px;
+            color: #000;
+            white-space: nowrap;
+        }
+
+        /* 县 */
+        .county-label {
+            font-size: 6px;
+            color: #000;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map">
+        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+        <script src="
+https://cdn.jsdelivr.net/npm/@turf/turf/turf.min.js"></script>
+        <script>
+            // ======================
+            // 地图
+            // ======================
+            const map = L.map('map', {
+                preferCanvas: false,
+                zoomAnimation: true,
+                fadeAnimation: true,
+                markerZoomAnimation: true,
+                zoomSnap: 0.5,
+                zoomDelta: 0.5,
+                wheelPxPerZoomLevel: 80
+            })
+                .setView([35.8, 104.2], 4);
+
+            /*
+                    L.tileLayer(
+                        'https://webrd{s}.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}',
+                        {
+                            subdomains: ['0', '1', '2', '3'],
+                            attribution: '高德地图'
+                        }
+                    )
+                        .addTo(map);
+            */
+            // ======================
+            // 控制按钮
+            // ======================
+            let showCityLabel = false;
+            let showProvinceLabel = true;
+            let showCountyLabel = false;
+            let cityMarkers = [];
+            let provinceMarkers = [];
+            let countyMarkers = [];
+            let countyLayer = L.layerGroup();
+            let control = L.control({
+                position: 'topright'
+            });
+            control.onAdd = function ()
+            {
+                let div = L.DomUtil.create('div', 'control-box');
+                div.innerHTML = `
+<label>
+    <input 
+    type="checkbox"
+    id="provinceToggle"
+    checked>
+    显示省级行政单位名称
+</label>
+<br>
+<label>
+    <input 
+    type="checkbox"
+    id="cityToggle">
+    显示地级行政单位名称
+</label>
+<br>
+<label>
+    <input
+    type="checkbox"
+    id="countyToggle">
+    显示县级行政单位名称
+</label>
+`;
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+            control.addTo(map);
+            document
+                .getElementById('provinceToggle')
+                .addEventListener('change', function (e)
+                {
+                    showProvinceLabel = e.target.checked;
+                    provinceMarkers.forEach(m =>
+                    {
+                        if (showProvinceLabel)
+                        {
+                            m.addTo(map);
+                        }
+                        else
+                        {
+                            map.removeLayer(m);
+                        }
+                    });
+                });
+            document
+                .getElementById('cityToggle')
+                .addEventListener('change', function (e)
+                {
+                    showCityLabel = e.target.checked;
+                    cityMarkers.forEach(m =>
+                    {
+                        if (showCityLabel)
+                        {
+                            m.addTo(map);
+                        }
+                        else
+                        {
+                            map.removeLayer(m);
+                        }
+                    });
+                });
+            document
+                .getElementById('countyToggle')
+                .addEventListener('change', function (e)
+                {
+                    showCountyLabel = e.target.checked;
+                    if (showCountyLabel)
+                    {
+                        countyLayer.addTo(map);
+                    }
+                    else
+                    {
+                        map.removeLayer(countyLayer);
+                    }
+                    countyMarkers.forEach(m =>
+                    {
+                        if (showCountyLabel)
+                        {
+                            m.addTo(map);
+                        }
+                        else
+                        {
+                            map.removeLayer(m);
+                        }
+                    });
+                });
+
+            function provinceColor(name)
+            {
+                const colors = {
+                    // 东北
+                    "黑龙江省": "#FF9999",
+                    "吉林省": "#99DDCC",
+                    "辽宁省": "#CC99FF", // 华北
+                    "内蒙古自治区": "#99BBDD",
+                    "河北省": "#FFBB88",
+                    "山西省": "#FFCC66",
+                    "北京市": "#99CCFF",
+                    "天津市": "#99DDDD", // 西北
+                    "新疆维吾尔自治区": "#88CCFF",
+                    "西藏自治区": "#DDA0DD",
+                    "青海省": "#FFD699",
+                    "甘肃省": "#FFAAAA",
+                    "宁夏回族自治区": "#99DDCC",
+                    "陕西省": "#99EEAA", // 华东
+                    "山东省": "#99BBDD",
+                    "江苏省": "#99DDDD",
+                    "浙江省": "#66BBEE",
+                    "安徽省": "#99AAEE",
+                    "福建省": "#88DD99",
+                    "江西省": "#FF9999",
+                    "上海市": "#FFD699", // 华中
+                    "河南省": "#CC99EE",
+                    "湖北省": "#99DDCC",
+                    "湖南省": "#FF9999", // 华南
+                    "广东省": "#FFCC88",
+                    "广西壮族自治区": "#88CCCC",
+                    "海南省": "#88DD99",
+                    "香港特别行政区": "#BB99EE",
+                    "澳门特别行政区": "#99CC77",
+                    "台湾省": "#AA99EE", // 西南
+                    "四川省": "#88EEAA",
+                    "重庆市": "#FFAA88",
+                    "贵州省": "#FFBB88",
+                    "云南省": "#99AACC"
+                };
+                return colors[name] || "#CCCCCC";
+            }
+
+            function getName(p)
+            {
+                return (p.name || p.NAME || p.NL_NAME_1 || "");
+            }
+
+            function addLabel(lat, lng, text, cls)
+            {
+                let marker = L.marker([lat, lng], {
+                    icon: L.divIcon({
+                        className: "",
+                        html: `
+            <div class="${cls}">
+            ${text}
+            </div>
+            `,
+                        iconSize: null
+                    }),
+                    interactive: false
+                });
+                return marker;
+            }
+
+            // ======================
+            // 省
+            // ======================
+            fetch("中国行政区划地图/天地图_geojson/中国_省.geojson")
+                .then(r => r.json())
+                .then(data =>
+                {
+                    data.features = data.features.filter(f => getName(f.properties) !== "境界线");
+                    L.geoJSON(data, {
+                        style: function (feature)
+                        {
+                            return {
+                                fillColor: provinceColor(getName(feature.properties)),
+                                fillOpacity: 0.75,
+                                color: "#000",
+                                weight: 0.6
+                            };
+                        },
+                        onEachFeature: function (feature, layer)
+                        {
+                            let point = turf.pointOnFeature(feature);
+                            let c = {
+                                lat: point.geometry.coordinates[1],
+                                lng: point.geometry.coordinates[0]
+                            };
+                            let label = addLabel(c.lat, c.lng, getName(feature.properties), "province-label");
+                            provinceMarkers.push(label);
+                            if (showProvinceLabel)
+                            {
+                                label.addTo(map);
+                            }
+                        }
+                    }).addTo(map);
+                });
+            // ======================
+            // 市
+            // ======================
+            fetch("中国行政区划地图/天地图_geojson/中国_市.geojson")
+                .then(r => r.json())
+                .then(data =>
+                {
+                    data.features = data.features.filter(f => getName(f.properties) !== "境界线");
+                    L.geoJSON(data, {
+                        style: function ()
+                        {
+                            return {
+                                fill: false,
+                                color: "#000",
+                                weight: 0.3
+                            };
+                        },
+                        onEachFeature: function (feature, layer)
+                        {
+                            let point = turf.pointOnFeature(feature);
+                            let c = {
+                                lat: point.geometry.coordinates[1],
+                                lng: point.geometry.coordinates[0]
+                            };
+                            let marker = addLabel(c.lat, c.lng, getName(feature.properties), "city-label");
+                            cityMarkers.push(marker);
+                            if (showCityLabel)
+                            {
+                                marker.addTo(map);
+                            }
+                        }
+                    }).addTo(map);
+                });
+            // ======================
+            // 县
+            // ======================
+            fetch("中国行政区划地图/天地图_geojson/中国_县.geojson")
+                .then(r => r.json())
+                .then(data =>
+                {
+                    data.features = data.features.filter(f => getName(f.properties) !== "境界线");
+                    L.geoJSON(data, {
+                        style: function ()
+                        {
+                            return {
+                                fill: false,
+                                color: "#000",
+                                weight: 0.2,
+                                dashArray: "5,5"
+                            };
+                        },
+                        onEachFeature: function (feature, layer)
+                        {
+                            let point = turf.pointOnFeature(feature);
+                            let c = {
+                                lat: point.geometry.coordinates[1],
+                                lng: point.geometry.coordinates[0]
+                            };
+                            let marker = addLabel(c.lat, c.lng, getName(feature.properties), "county-label");
+                            countyMarkers.push(marker);
+                            if (showCountyLabel)
+                            {
+                                marker.addTo(map);
+                            }
+                        }
+                    })
+                        .addTo(countyLayer);
+                });
+        </script>
+</body>
+
+</html>
